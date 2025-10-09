@@ -1,15 +1,17 @@
 import net from "net";
 import 'dotenv/config'
 import * as osu from "osu-api-v2-js"
-
+import * as http from "http"
+import open from "open";
 
 const APPLICATION_ID = process.env.DISCORD_APPLICATION_ID //need to include your discord application id
 const OSU_API_CLIENT_ID = process.env.OSU_API_CLIENT_ID //create oath2 in your osu profile to get these two variables
 const OSU_API_CLIENT_SECRET = process.env.OSU_API_CLIENT_SECRET
+const FRIEND_OSU_ID = process.env.FRIEND_OSU_ID
 
 const PIPE_NAME = "\\\\.\\pipe\\discord-ipc-1"; 
 const FAKE_PIPE = "\\\\.\\pipe\\discord-ipc-0";
-const api = await osu.API.createAsync(OSU_API_CLIENT_ID, OSU_API_CLIENT_SECRET)
+//const api = await osu.API.createAsync(OSU_API_CLIENT_ID, OSU_API_CLIENT_SECRET)
 
 // create server on pipe 0
 // connect to pipe 1 
@@ -26,43 +28,50 @@ const api = await osu.API.createAsync(OSU_API_CLIENT_ID, OSU_API_CLIENT_SECRET)
 // after that has created print listening in terminal
 const server = net.createServer().listen(FAKE_PIPE,()=>{console.log("listening")})
 const client = await loopConnection(PIPE_NAME)
+
+const redirect_uri = 'http://localhost:3000/callback'
+const url = osu.generateAuthorizationURL(OSU_API_CLIENT_ID,'http://localhost:3000/callback',['friends.read', 'identify', 'public'],);
+const code = await getCode(url)
+const api = await osu.API.createAsync(OSU_API_CLIENT_ID, OSU_API_CLIENT_SECRET, {code, redirect_uri}, {verbose: "all"})
+//const score = await api.getBeatmapUserScore(2561615,3180619)//2561615,3180619
+
 //open connection to discord ipc server 
 const OSU_ID = 367827983903490050; // this is osu's application id no need to worry 
 
 const APPLICATION_HANDSHAKE = { v: 1, client_id: APPLICATION_ID };
 // quick application connect to get handshake id
-const FAKE_HANDSHAKE = await new Promise((resolve,reject)=>
-{
-    const applicationClient = net.createConnection(PIPE_NAME, () => {
-        console.log("Connected to Discord IPC");
+// const FAKE_HANDSHAKE = await new Promise((resolve,reject)=>
+// {
+//     const applicationClient = net.createConnection(PIPE_NAME, () => {
+//         console.log("Connected to Discord IPC");
     
-        const handshake = { v: 1, client_id: APPLICATION_ID };
-        client.on("data", (buffer) => {
-            let offset = 0;
-            while (offset < buffer.length) {
-                const opcode = buffer.readInt32LE(offset);
-                const length = buffer.readInt32LE(offset + 4);
-                const jsonData = buffer.subarray(offset + 8, offset + 8 + length).toString("utf8");
-                try {
-                    const data = JSON.parse(jsonData);
-                    console.log("Discord Server Received:", data);
-                    applicationClient.end();
-                    resolve(buffer)
+//         const handshake = { v: 1, client_id: APPLICATION_ID };
+//         client.on("data", (buffer) => {
+//             let offset = 0;
+//             while (offset < buffer.length) {
+//                 const opcode = buffer.readInt32LE(offset);
+//                 const length = buffer.readInt32LE(offset + 4);
+//                 const jsonData = buffer.subarray(offset + 8, offset + 8 + length).toString("utf8");
+//                 try {
+//                     const data = JSON.parse(jsonData);
+//                     console.log("Discord Server Received:", data);
+//                     applicationClient.end();
+//                     resolve(buffer)
                     
-                } catch (e) {
-                    console.log("Non-JSON data:", jsonData);
-                }
-                offset += 8 + length;
-            }
-                    //socket.write(buffer)
-        });
-        client.write(buildFrame(0, handshake)); // opcode 0 = handshake
+//                 } catch (e) {
+//                     console.log("Non-JSON data:", jsonData);
+//                 }
+//                 offset += 8 + length;
+//             }
+//                     //socket.write(buffer)
+//         });
+//         client.write(buildFrame(0, handshake)); // opcode 0 = handshake
     
-    });
-    applicationClient.on('error',reject)
-})
+//     });
+//     applicationClient.on('error',reject)
+// })
 
-console.log(FAKE_HANDSHAKE)
+// console.log(FAKE_HANDSHAKE)
 
 
 server.on('connection',async(socket) =>
@@ -82,18 +91,41 @@ server.on('connection',async(socket) =>
                     if(data?.client_id == OSU_ID)
                     {
                         console.log("osu")
-                        socket.write(FAKE_HANDSHAKE)
+                        client.write(buffer)
+                        // socket.write(FAKE_HANDSHAKE)
+                        // return
                         //client.write(buildFrame(0, APPLICATION_HANDSHAKE));
+                    }
+                    else if(data?.evt == "ACTIVITY_SPECTATE" || data?.evt == "ACTIVITY_JOIN" || data?.evt == "ACTIVITY_JOIN_REQUEST" || data?.cmd == "SEND_ACTIVITY_JOIN_INVITE")
+                    {
+                        client.write(buffer)
                     }
                     else if(data?.cmd == "SET_ACTIVITY" && data?.args.activity.state == "Idle")
                     {
                         setActivityIdle(data.args.activity.assets.large_text)    
                     }
+                    else if(data?.cmd == "SET_ACTIVITY" && data?.args.activity.secrets?.join)
+                    {
+                        setActivityInMulti(data.args.activity.details,data.args.activity.state,data.args.activity.assets.large_text,data.args.activity.party.size,data.args.activity.party,data.args.activity.secrets)
+                    }
                     else if(data?.cmd == "SET_ACTIVITY" && data?.args.activity.state == "Clicking circles")
                     {
                         setActivityClicking(data.args.activity.details,data.args.activity.assets.large_text)    
                     }
-                } catch (e) {
+                    else{
+                        client.write(buffer)
+                    }
+
+                //     else if(data?.cmd == "SET_ACTIVITY" && data?.args.activity.state == "Looking for a game")
+                //     {
+                //         setActivityLookingForGame(data.args.activity.assets.large_text)    
+                //     }
+                //     else if(data?.cmd == "SET_ACTIVITY" && data?.args.activity.state == "AFK")
+                //     {
+                //         setActivityAFK(data.args.activity.assets.large_text)    
+                //     }
+                    
+                 } catch (e) {
                     console.log("Non-JSON data:", jsonData);
                 }
                 offset += 8 + length; 
@@ -112,11 +144,23 @@ server.on('connection',async(socket) =>
                 try {
                     const data = JSON.parse(jsonData);
                     console.log("Discord Server Received:", data);
+                    // if(data?.evt == "ACTIVITY_JOIN_REQUEST")
+                    // {
+                    //     data.data.activity.application_id=OSU_ID
+                    //     const payload = buildFrame(1, data); 
+                    //     socket.write(payload)
+                    //     return
+                    // }
+                    if(data?.cmd== "SET_ACTIVITY")
+                    {
+                        return
+                    }
                 } catch (e) {
                     console.log("Non-JSON data:", jsonData);
                 }
                 offset += 8 + length;
             }
+            socket.write(buffer)
 
         });
         client.on("close",()=>{
@@ -180,7 +224,7 @@ function setActivityIdle(large_text) {
                 assets: {
                     large_image: "https://imgs.search.brave.com/WxyV9MqwtZie3vAyhcCET4KiN8z_LSV7jqMAutpF6Rc/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9tZWRp/YS50ZW5vci5jb20v/QXQtOXU5dVVZdlVB/QUFBTS9tdWRraXAt/cGlzc2luZy1tdWRr/aXAuZ2lm.gif",
                     large_text: "mudkip blicky",
-                    small_image: "osu-game-font",
+                    small_image: "osu_logo",//osu-game-font
                     small_text: large_text
                 },
                 buttons: [
@@ -197,7 +241,7 @@ function setActivityIdle(large_text) {
 
 
 async function setActivityClicking(details,large_text) {
-    const [mapUrl,coverUrl,difficultyRating,mapBpm,mapLength] = await searchBeatmap(details)
+    const [mapUrl,coverUrl,difficultyRating,mapBpm,mapLength,friendScore] = await searchBeatmap(details) 
     const time = Math.floor(Date.now() / 1000)
     const payload = {
         cmd: "SET_ACTIVITY",
@@ -209,13 +253,14 @@ async function setActivityClicking(details,large_text) {
                 assets: {
                     large_image: coverUrl,
                     large_text: "map background",
-                    small_image: "osu-game-font",
+                    small_image: "osu_logo",
                     small_text: large_text
                 },
                 buttons: [
-                    { label: difficultyRating + "* | " + mapBpm +" bpm  | "  + formatTime(mapLength) +" mins", url: "https://www.youtube.com/watch?v=cG21b8Kx2DI" },
+                    //{ label: difficultyRating + "* | " + mapBpm +" bpm  | "  + formatTime(mapLength) +" mins", url: "https://www.youtube.com/watch?v=cG21b8Kx2DI" },
                     { label: "current map link", url: mapUrl}
                 ],
+                
                 instance: false
             }
         },
@@ -225,11 +270,103 @@ async function setActivityClicking(details,large_text) {
           },
         nonce: Math.random().toString(36).substring(2)
     };
+    if(friendScore?.score?.id){
+        payload.args.activity.buttons.push({ label: "watch out", url: "https://osu.ppy.sh/scores/"+friendScore.score.id })
+    }
+    else{
+        payload.args.activity.buttons.push({ label: difficultyRating + "* | " + mapBpm +" bpm  | "  + formatTime(mapLength) +" mins", url: "https://www.youtube.com/watch?v=cG21b8Kx2DI" })
+    }
     client.write(buildFrame(1, payload)); 
 
 }
 
+function setActivityLookingForGame(large_text) {
+    const payload = {
+        cmd: "SET_ACTIVITY",
+        args: {
+            pid: process.pid,
+            activity: {
+                state: "bottom text",
+                details: "browsing multi",
+                assets: {
+                    large_image: "https://imgs.search.brave.com/WxyV9MqwtZie3vAyhcCET4KiN8z_LSV7jqMAutpF6Rc/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9tZWRp/YS50ZW5vci5jb20v/QXQtOXU5dVVZdlVB/QUFBTS9tdWRraXAt/cGlzc2luZy1tdWRr/aXAuZ2lm.gif",
+                    large_text: "mudkip blicky",
+                    small_image: "osu-game-font",
+                    small_text: large_text
+                },
+                buttons: [
+                    { label: "osu profile", url: "https://osu.ppy.sh/users/19266840" }
+                ],
+                instance: false
+            }
+        },
+        nonce: Math.random().toString(36).substring(2)
+    };
+    client.write(buildFrame(1, payload)); 
 
+}
+function setActivityAFK(large_text) {
+    const payload = {
+        cmd: "SET_ACTIVITY",
+        args: {
+            pid: process.pid,
+            activity: {
+                state: "AFK",
+                details: "placeholder",
+                assets: {
+                    large_image: "https://imgs.search.brave.com/WxyV9MqwtZie3vAyhcCET4KiN8z_LSV7jqMAutpF6Rc/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9tZWRp/YS50ZW5vci5jb20v/QXQtOXU5dVVZdlVB/QUFBTS9tdWRraXAt/cGlzc2luZy1tdWRr/aXAuZ2lm.gif",
+                    large_text: "mudkip blicky",
+                    small_image: "osu-game-font",
+                    small_text: large_text
+                },
+                buttons: [
+                    { label: "osu profile", url: "https://osu.ppy.sh/users/19266840" }
+                ],
+                instance: false
+            }
+        },
+        nonce: Math.random().toString(36).substring(2)
+    };
+    client.write(buildFrame(1, payload)); 
+
+}
+
+async function setActivityInMulti(songName,gameName,large_text,partySize,osuParty,osuSecrets) {
+    let mapUrl,coverUrl,difficultyRating,mapBpm,mapLength;
+    if(songName)  {[mapUrl,coverUrl,difficultyRating,mapBpm,mapLength] = await searchBeatmap(songName)}
+    if(!songName){
+        songName = "choosing a song"
+        coverUrl = "https://imgs.search.brave.com/WxyV9MqwtZie3vAyhcCET4KiN8z_LSV7jqMAutpF6Rc/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9tZWRp/YS50ZW5vci5jb20v/QXQtOXU5dVVZdlVB/QUFBTS9tdWRraXAt/cGlzc2luZy1tdWRr/aXAuZ2lm.gif"
+    }
+
+
+    const payload = {
+        cmd: "SET_ACTIVITY",
+        args: {
+            pid: process.pid,
+            activity: {
+                state: "["+songName+']',
+                details: "in lobby ("+partySize[0]+" of "+partySize[1]+"): " +gameName,
+                assets: {
+                    large_image: coverUrl,
+                    large_text: "map background",
+                    small_image: "osu_logo",
+                    small_text: large_text
+                },
+                // buttons: [
+                //     { label: "osu profile", url: "https://osu.ppy.sh/users/19266840" }
+                // ],
+                party:osuParty,
+                secrets:osuSecrets,
+
+                instance: false
+            }
+        },
+        nonce: Math.random().toString(36).substring(2)
+    };
+    client.write(buildFrame(1, payload)); 
+
+}
 function formatTime(seconds) {
     const minutes = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -259,7 +396,16 @@ async function searchBeatmap(q) {
                 //console.log(beatmap.version)
                 if(beatmap.version==targetVersion)
                 {
-                    return [beatmap.url,beatmapset.covers['list@2x'],beatmap.difficulty_rating,beatmap.bpm,beatmap.total_length]
+                    let score;
+                    try{
+
+                        score = await api.getBeatmapUserScore(beatmap.id,+FRIEND_OSU_ID)
+                        //console.log(score)
+                    }
+                    catch(err){
+                        console.log(err)
+                    }
+                    return [beatmap.url,beatmapset.covers['list@2x'],beatmap.difficulty_rating,beatmap.bpm,beatmap.total_length,score]
                 }
             }
         }
@@ -282,7 +428,16 @@ async function searchBeatmap(q) {
                     //console.log(beatmap.version)
                     if(beatmap.version==targetVersion)
                     {
-                        return [beatmap.url,beatmapset.covers['list@2x'],beatmap.difficulty_rating,beatmap.bpm,beatmap.total_length]
+                        let score;
+                        try{
+
+                            score = await api.getBeatmapUserScore(beatmap.id,+FRIEND_OSU_ID)
+                            //console.log(score)
+                        }
+                        catch{
+                        
+                        }
+                        return [beatmap.url,beatmapset.covers['list@2x'],beatmap.difficulty_rating,beatmap.bpm,beatmap.total_length,score]
                     }
                 }
             }
@@ -295,3 +450,30 @@ async function searchBeatmap(q) {
         return placeHolder;
     }
 }
+
+async function getCode(authorization_url){
+    // Open a temporary server to receive the code when the browser is sent to the redirect_uri after confirming authorization
+    const httpserver = http.createServer()
+    const host = redirect_uri.substring(redirect_uri.indexOf("/") + 2, redirect_uri.lastIndexOf(":"))
+    const port = Number(redirect_uri.substring(redirect_uri.lastIndexOf(":") + 1).split("/")[0])
+    httpserver.listen({host, port})
+  
+    // Open the browser to the page on osu!web where you click a button to say you authorize your application
+    console.log("Waiting for code...")
+    const command = (process.platform == "darwin" ? "open" : process.platform == "win32" ? "start" : "xdg-open")
+    //exec(`${command} "${authorization_url}"`)
+    open(url)
+  
+    // Check the URL for a `code` GET parameter, get it if it's there
+    const code= await new Promise((resolve) => {
+      httpserver.on("request", (request, response) => {
+        if (request.url) {
+          console.log("Received code!")
+          response.end("Worked! You may now close this tab.", "utf-8")
+          httpserver.close() // Close the temporary server as it is no longer needed
+          resolve(request.url.substring(request.url.indexOf("code=") + 5))
+        }
+      })
+    })
+    return code
+  }
