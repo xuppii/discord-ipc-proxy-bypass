@@ -3,6 +3,10 @@ import 'dotenv/config'
 import * as osu from "osu-api-v2-js"
 import * as http from "http"
 import open from "open";
+import { spawn,exec } from "child_process";
+import fs from "fs"
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 const APPLICATION_ID = process.env.DISCORD_APPLICATION_ID //need to include your discord application id
 const OSU_API_CLIENT_ID = process.env.OSU_API_CLIENT_ID //create oath2 in your osu profile to get these two variables
@@ -12,6 +16,17 @@ const FRIEND_OSU_ID = process.env.FRIEND_OSU_ID
 const PIPE_NAME = "\\\\.\\pipe\\discord-ipc-1"; 
 const FAKE_PIPE = "\\\\.\\pipe\\discord-ipc-0";
 //const api = await osu.API.createAsync(OSU_API_CLIENT_ID, OSU_API_CLIENT_SECRET)
+let electronProc;
+
+
+// const fs = require('fs');
+// const path = require('path');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const dataFile = join(__dirname, 'data.json');
+
+//electronProc = openElectronOverlay();
+
 
 // create server on pipe 0
 // connect to pipe 1 
@@ -33,7 +48,7 @@ const redirect_uri = 'http://localhost:3000/callback'
 const url = osu.generateAuthorizationURL(OSU_API_CLIENT_ID,'http://localhost:3000/callback',['friends.read', 'identify', 'public'],);
 const code = await getCode(url)
 const api = await osu.API.createAsync(OSU_API_CLIENT_ID, OSU_API_CLIENT_SECRET, {code, redirect_uri}, {verbose: "all"})
-//const score = await api.getBeatmapUserScore(2561615,3180619)//2561615,3180619
+
 
 //open connection to discord ipc server 
 const OSU_ID = 367827983903490050; // this is osu's application id no need to worry 
@@ -214,6 +229,12 @@ function buildFrame(opcode, payload) {
 
 
 function setActivityIdle(large_text) {
+    if(electronProc){
+        exec(`taskkill /F /T /PID ${electronProc.pid}`, (err) => {
+            if (err) console.error("Failed to kill Electron:", err);
+          });
+        electronProc = null
+    }
     const payload = {
         cmd: "SET_ACTIVITY",
         args: {
@@ -272,7 +293,12 @@ async function setActivityClicking(details,large_text) {
     };
     if(friendScore?.score?.id){
         payload.args.activity.buttons.push({ label: "watch out", url: "https://osu.ppy.sh/scores/"+friendScore.score.id })
+        setScore(friendScore.score.user.username, friendScore.score.classic_total_score,(friendScore.score.accuracy*100).toFixed(2), friendScore.score.max_combo,friendScore.score.statistics.miss)
+        if(!electronProc){
+            electronProc = openElectronOverlay();
+        }
     }
+
     else{
         payload.args.activity.buttons.push({ label: difficultyRating + "* | " + mapBpm +" bpm  | "  + formatTime(mapLength) +" mins", url: "https://www.youtube.com/watch?v=cG21b8Kx2DI" })
     }
@@ -333,7 +359,7 @@ function setActivityAFK(large_text) {
 
 async function setActivityInMulti(songName,gameName,large_text,partySize,osuParty,osuSecrets) {
     let mapUrl,coverUrl,difficultyRating,mapBpm,mapLength;
-    if(songName)  {[mapUrl,coverUrl,difficultyRating,mapBpm,mapLength] = await searchBeatmap(songName)}
+    if(songName)  {[mapUrl,coverUrl,difficultyRating,mapBpm,mapLength,friendScore] = await searchBeatmap(songName)}
     if(!songName){
         songName = "choosing a song"
         coverUrl = "https://imgs.search.brave.com/WxyV9MqwtZie3vAyhcCET4KiN8z_LSV7jqMAutpF6Rc/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9tZWRp/YS50ZW5vci5jb20v/QXQtOXU5dVVZdlVB/QUFBTS9tdWRraXAt/cGlzc2luZy1tdWRr/aXAuZ2lm.gif"
@@ -469,11 +495,87 @@ async function getCode(authorization_url){
       httpserver.on("request", (request, response) => {
         if (request.url) {
           console.log("Received code!")
-          response.end("Worked! You may now close this tab.", "utf-8")
+          response.writeHead(200, { "Content-Type": "text/html" });
+          response.end(`
+            <html>
+              <body style="font-family:sans-serif; text-align:center; margin-top:30vh;">
+                <h2>✅ Authorization complete!</h2>
+                <p>You can close this window now.</p>
+                <script>
+                  window.close();
+                  setTimeout(() => { window.location.href = "about:blank"; }, 1000);
+                </script>
+              </body>
+            </html>
+          `);
           httpserver.close() // Close the temporary server as it is no longer needed
           resolve(request.url.substring(request.url.indexOf("code=") + 5))
         }
       })
     })
     return code
+  }
+
+
+function openElectronOverlay() {
+    const electronProcess = spawn("npx", ["electron", "electronTest.js"], {
+        stdio: "inherit",
+        shell: true
+    });
+
+    return electronProcess;
+}
+
+function setScore(username, score, grade, combo,missCount) {
+
+    let newGrade;
+    if(missCount == 0)
+    {
+        if(grade == 100){
+            newGrade = (+grade).toFixed(1)+"% SS"; 
+        }
+        else if(grade >= 93)
+        {
+            newGrade = (+grade).toFixed(1)+"% S"; 
+        }
+        else if(grade >= 86)
+        {
+            newGrade = (+grade).toFixed(1)+"% A"; 
+        }
+        else if(grade >= 70)
+        {
+            newGrade = (+grade).toFixed(1)+"% B"; 
+        }
+        else{
+            newGrade = (+grade).toFixed(1)+"% C"; 
+        }
+    }
+    else{
+        if(grade >= 93)
+        {
+            newGrade = (+grade).toFixed(1)+"% A"; 
+        }
+        else if(grade >= 86)
+        {
+            newGrade = (+grade).toFixed(1)+"% B"; 
+        }
+        else if(grade >= 70)
+        {
+            newGrade = (+grade).toFixed(1)+"% C"; 
+        }
+        else{
+            newGrade = (+grade).toFixed(1)+"% D"; 
+        }
+    }
+    const formattedScore = Number(score).toLocaleString('en-US');
+
+    const formattedCombo = `${combo}x`;
+  
+    const data = {
+      username,
+      score: formattedScore,
+      grade: newGrade,
+      combo: formattedCombo
+    };
+    fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf-8');
   }

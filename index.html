@@ -1,0 +1,138 @@
+
+<style>
+  @font-face {
+  font-family: 'Aller-Rg';
+  src: url('./fonts/Aller_Lt.ttf') format('truetype'); 
+  font-weight: normal;
+  font-style: normal;
+}
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    width: 100vw;           /* ensure it takes full width */
+    margin: 0;              /* remove default margin */
+    overflow: hidden;       /* hides scrollbars */
+
+    background: transparent; /* dark background */
+    background-color: rgba(0, 0, 0, 0.5);
+    font-family: 'Aller-Rg';
+  }
+
+  .score-card {
+  position: relative;      /* allows absolute positioning inside */
+  width: 200px;
+  /* padding: 10px 15px; */
+  padding-left:5px;
+  color: white;
+  display: flex;
+  flex-direction: column;  /* stack username and score vertically */
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.score-info {
+  display: flex;
+  flex-direction: column;
+  /* gap: 5px; */
+}
+
+.username {
+  font-size: 24px;
+  letter-spacing: 2px;
+}
+
+.score {
+  font-size: 19px;
+  padding-top:12px;
+  opacity: 0.8;
+}
+
+.combo-top {
+  position: absolute;
+  top: 5px;
+  right: 15px;
+  font-size: 15px;
+  color: #41e25c;
+}
+
+.combo-bottom {
+  position: absolute;
+  bottom: 0px;
+  right: 15px;
+  font-size: 19px;
+  color: #88dcdf;
+  letter-spacing: 0px;
+}
+
+</style>
+</head>
+<body>
+  <div class="score-card">
+    <div class="score-info">
+      <div class="username">user</div>
+      <div class="score">3,154,280</div>
+    </div>
+    <div class="combo-top">97.3% A</div>
+    <div class="combo-bottom">265x</div>
+  </div>
+  <script>
+    const fs = require('fs');
+    const path = require('path');
+
+    const dataFile = path.join(__dirname, 'data.json');
+
+    function updateFromFile() {
+      try {
+        const raw = fs.readFileSync(dataFile, 'utf-8');
+        const data = JSON.parse(raw);
+
+        const usernameEl = document.querySelector('.username');
+        const scoreEl = document.querySelector('.score');
+        const comboTopEl = document.querySelector('.combo-top');
+        const comboBottomEl = document.querySelector('.combo-bottom');
+
+        usernameEl.textContent = data.username;
+        scoreEl.textContent = data.score;
+        comboTopEl.textContent = data.grade;
+        comboBottomEl.textContent = data.combo;
+
+        // Extract the grade letter (e.g. "97.3% A" → "A")
+        const gradeLetter = data.grade.trim().slice(-1).toUpperCase();
+
+        // Change color based on grade
+        switch (gradeLetter) {
+          case 'A':
+            comboTopEl.style.color = '#41e25c'; // greenish
+            break;
+          case 'B':
+            comboTopEl.style.color = '#3B82F6'; // dark blue
+            break;
+          case 'C':
+            comboTopEl.style.color = '#f59e0b'; // orange
+            break;
+          case 'D':
+            comboTopEl.style.color = '#ef4444'; // red
+            break;
+          default:
+            comboTopEl.style.color = '#ffffff'; // fallback white
+            break;
+        }
+      } catch (err) {
+        console.error('Error reading data.json:', err);
+      }
+    }
+
+    // Initial update
+    updateFromFile();
+
+    // Watch file for changes
+    fs.watchFile(dataFile, { interval: 100 }, (curr, prev) => {
+      if (curr.mtime !== prev.mtime) {
+        updateFromFile();
+      }
+    });
+  </script>
+</body>
+</html>
